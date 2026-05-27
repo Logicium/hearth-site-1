@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { siteConfig } from '../config/site.config'
-import { PLATFORM_ENABLED } from '../platform/config'
-import { adminRoutes } from '../admin/routes'
+import { PLATFORM_ENABLED } from '@apotome/archetype-shared/platform/config'
+import { adminRoutes } from '@apotome/archetype-shared/admin/routes'
 
 const isPortfolio = siteConfig.variant === 'portfolio'
 

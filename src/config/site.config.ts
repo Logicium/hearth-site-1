@@ -1,4 +1,4 @@
-import type { ThemeName, SwatchName, SiteVariant } from '../themes/tokens'
+import type { ThemeName, SwatchName, SiteVariant } from '@apotome/archetype-shared/themes/tokens'
 
 export interface PhotoSlot { src: string; alt?: string; caption?: string }
 
@@ -36,7 +36,9 @@ export interface HearthSiteConfig {
   social: Array<{ label: string; href: string }>
 }
 
-export const siteConfig: HearthSiteConfig = {
+import { reactive } from 'vue'
+
+export const siteConfig: HearthSiteConfig = reactive(({
   brand: 'Hearth Inn',
   tagline: 'A small hotel in Trinidad',
   blurb: 'Eight rooms in a restored 1903 brick building, two blocks from Main Street.',
@@ -122,4 +124,4 @@ export const siteConfig: HearthSiteConfig = {
     { label: 'Instagram', href: 'https://instagram.com' },
     { label: 'Facebook', href: 'https://facebook.com' },
   ],
-}
+}))

@@ -9,6 +9,7 @@ interface Room {
   bookUrl?: string
 }
 
+import { RouterLink } from 'vue-router'
 import OptimizedImage from '@apotome/archetype-shared/components/OptimizedImage.vue'
 
 defineProps<{
@@ -17,6 +18,12 @@ defineProps<{
   intro?: string
   rooms: Room[]
 }>()
+
+/** Reserve goes to the internal booking page unless the room explicitly
+    points at an external system. */
+function isExternal(url?: string): boolean {
+  return !!url && /^https?:\/\//.test(url)
+}
 </script>
 
 <template>
@@ -44,7 +51,8 @@ defineProps<{
                 <small>From</small>
                 <strong>{{ r.rateFrom }}</strong>
               </span>
-              <a v-if="r.bookUrl" :href="r.bookUrl" class="ap-btn">Reserve</a>
+              <a v-if="isExternal(r.bookUrl)" :href="r.bookUrl" class="ap-btn" target="_blank" rel="noopener">Reserve</a>
+              <RouterLink v-else :to="r.bookUrl || '/book'" class="ap-btn">Reserve</RouterLink>
             </div>
           </div>
         </article>

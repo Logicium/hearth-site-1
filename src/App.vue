@@ -18,12 +18,17 @@ const { isReady, progress, loaded, total, label, preloadCritical } = useImagePre
 onMounted(async () => {
   initFromConfig(siteConfig, 'stay')
   useApScrollbar()
-  await preloadCritical([
-    siteConfig.photos.hero.src,
-    siteConfig.photos.about.src,
-    ...siteConfig.rooms.map(r => r.image),
-    ...siteConfig.photos.gallery.map(p => p.src),
-  ])
+  try {
+    await preloadCritical([
+      siteConfig.photos.hero.src,
+      siteConfig.photos.about.src,
+      ...siteConfig.rooms.map(r => r.image),
+      ...siteConfig.photos.gallery.map(p => p.src),
+    ])
+  } catch {
+    // Malformed hydrated content must never strand the splash screen.
+    await preloadCritical([])
+  }
 })
 
 const showSwitcher = usePreferences().themePickerVisible

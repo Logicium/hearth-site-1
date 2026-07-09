@@ -8,6 +8,11 @@ import { useSiteContentStore } from '@apotome/archetype-shared/platform/siteCont
 
 const store = useSiteContentStore()
 const showLodging = computed(() => store.hasAddOn('lodging'))
+/** Only show the external-booking fallback for a real external URL —
+    internal paths would just loop back to this page. */
+const externalBookingUrl = computed(() =>
+  /^https?:\/\//.test(siteConfig.bookingUrl || '') ? siteConfig.bookingUrl : null,
+)
 </script>
 
 <template>
@@ -27,8 +32,8 @@ const showLodging = computed(() => store.hasAddOn('lodging'))
     intro="Choose your nights and party size — we'll show you what's available."
   />
 
-  <div v-else class="ap-container" style="padding-top: 2rem; text-align: center;">
-    <a :href="siteConfig.bookingUrl" class="ap-btn" target="_blank" rel="noopener">Open booking site</a>
+  <div v-else-if="externalBookingUrl" class="ap-container" style="padding-top: 2rem; text-align: center;">
+    <a :href="externalBookingUrl" class="ap-btn" target="_blank" rel="noopener">Open booking site</a>
   </div>
 
   <ContactSection

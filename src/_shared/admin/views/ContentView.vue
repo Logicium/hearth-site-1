@@ -7,13 +7,18 @@ import { tabsForArchetype, type TabId } from '../contentSchemas'
 import AiCopyButton from '../components/AiCopyButton.vue'
 import MapSearchPicker from '../components/MapSearchPicker.vue'
 import TextAreaField from '../../components/forms/TextAreaField.vue'
+import ImageInput from '../components/inputs/ImageInput.vue'
+import ChipsInput from '../components/inputs/ChipsInput.vue'
+import IconInput from '../components/inputs/IconInput.vue'
+import SocialIconInput from '../components/inputs/SocialIconInput.vue'
+import MenuScanButton from '../components/MenuScanButton.vue'
 import { useToast } from '../composables/useToast'
 
 interface PhotoSlot { src: string; alt?: string; caption?: string }
-interface MenuItem { name: string; description?: string; price: string; tags?: string[] }
-interface MenuCategory { name: string; description?: string; items: MenuItem[] }
+interface MenuItem { name: string; description?: string; price: string; tags?: string[]; image?: string }
+interface MenuCategory { name: string; description?: string; items: MenuItem[]; image?: string }
 interface HourRow { day: string; open: string }
-interface SocialLink { label: string; href: string }
+interface SocialLink { label: string; href: string; icon?: string }
 interface FactRow { label: string; value: string }
 interface Testimonial { quote: string; author: string; source?: string }
 // Archetype-specific item types — these MIRROR the shapes the deployed
@@ -348,10 +353,6 @@ async function uploadImage(slot: PhotoSlot, key: string, file: File) {
   finally { uploading.value[key] = false }
 }
 
-function onPhotoFile(slot: PhotoSlot, key: string, evt: Event) {
-  const file = (evt.target as HTMLInputElement).files?.[0]
-  if (file) uploadImage(slot, key, file)
-}
 
 /** Upload many gallery photos at once. Each file becomes a new gallery slot. */
 async function onBulkGalleryFiles(evt: Event) {
@@ -395,18 +396,41 @@ function addParagraph()               { c.story.paragraphs.push('') }
 function removeParagraph(i: number)   { c.story.paragraphs.splice(i, 1) }
 function addFact()                    { c.story.facts = c.story.facts ?? []; c.story.facts.push({ label: '', value: '' }) }
 function removeFact(i: number)        { c.story.facts!.splice(i, 1) }
-function addTestimonial()             { c.testimonials.push({ quote: '', author: '', source: '' }) }
-function removeTestimonial(i: number) { c.testimonials.splice(i, 1) }
-function addSocial()                  { c.social.push({ label: '', href: '' }) }
+function addSocial()                  { c.social.push({ label: '', href: '', icon: '' }) }
 function removeSocial(i: number)      { c.social.splice(i, 1) }
 function addGallerySlot()             { c.photos.gallery.push({ src: '', alt: '' }) }
 function removeGallerySlot(i: number) { c.photos.gallery.splice(i, 1) }
-function addCategory()                { c.menu.categories.push({ name: '', description: '', items: [] }) }
+function addCategory()                { c.menu.categories.push({ name: '', description: '', items: [], image: '' }) }
 function removeCategory(i: number)    { c.menu.categories.splice(i, 1) }
-function addMenuItem(cat: MenuCategory)              { cat.items.push({ name: '', description: '', price: '', tags: [] }) }
+function addMenuItem(cat: MenuCategory)              { cat.items.push({ name: '', description: '', price: '', tags: [], image: '' }) }
 function removeMenuItem(cat: MenuCategory, i: number){ cat.items.splice(i, 1) }
-function tagsStr(item: MenuItem)                     { return (item.tags ?? []).join(', ') }
-function setTags(item: MenuItem, v: string)          { item.tags = v.split(',').map(t => t.trim()).filter(Boolean) }
+
+/** Merge AI-scanned menu categories into the editor. Existing categories are
+    kept; scanned categories with a matching name absorb the new items, and
+    brand-new categories are appended. Images/tags are left for the owner to
+    add — the scan only pulls text. */
+interface ScannedMenu { categories: Array<{ name: string; description?: string; items: Array<{ name: string; description?: string; price?: string }> }> }
+function applyScannedMenu(scanned: ScannedMenu) {
+  let added = 0
+  for (const sc of scanned.categories ?? []) {
+    const name = (sc.name || '').trim()
+    if (!name) continue
+    let cat = c.menu.categories.find(x => x.name.trim().toLowerCase() === name.toLowerCase())
+    if (!cat) {
+      cat = { name, description: sc.description?.trim() || '', items: [], image: '' }
+      c.menu.categories.push(cat)
+    } else if (!cat.description && sc.description) {
+      cat.description = sc.description.trim()
+    }
+    for (const it of sc.items ?? []) {
+      const itemName = (it.name || '').trim()
+      if (!itemName) continue
+      cat.items.push({ name: itemName, description: it.description?.trim() || '', price: (it.price || '').trim(), tags: [], image: '' })
+      added++
+    }
+  }
+  toast.success(added ? `Added ${added} item${added === 1 ? '' : 's'} from your menu photo` : 'No menu items found in that image')
+}
 
 // Archetype-specific helpers
 function addRoom()    { c.rooms.push({ name: '', blurb: '', rateFrom: '', image: '', features: [] }) }
@@ -426,23 +450,6 @@ function removeEvent(i: number) { c.events.splice(i, 1) }
 function addPillar()  { c.mission.pillars.push({ title: '', body: '' }) }
 function removePillar(i: number)  { c.mission.pillars.splice(i, 1) }
 
-/** Room features are string[] in the payload; the editor shows a comma list. */
-function featuresStr(r: RoomItem)          { return (r.features ?? []).join(', ') }
-function setFeatures(r: RoomItem, v: string) { r.features = v.split(',').map(t => t.trim()).filter(Boolean) }
-
-async function uploadInline(target: object, key: string, file: File, prop = 'src') {
-  uploading.value[key] = true
-  try {
-    const { base64, contentType, filename } = await prepareImage(file)
-    const r = await contentClient.uploadMedia(siteId.value, filename, contentType, base64)
-    ;(target as Record<string, unknown>)[prop] = r.url
-  } catch (e) { toast.error(e instanceof Error ? e.message : String(e)) }
-  finally { uploading.value[key] = false }
-}
-function onInlineFile(target: object, key: string, evt: Event, prop = 'src') {
-  const file = (evt.target as HTMLInputElement).files?.[0]
-  if (file) uploadInline(target, key, file, prop)
-}
 
 /** Upload a PDF (or any non-image) to blob storage and store the URL on `c.menu.fullMenuUrl`. */
 async function onMenuPdfFile(evt: Event) {
@@ -591,30 +598,13 @@ watch(siteId, loadDraft)
           <div class="favicon-row">
             <img v-if="c.favicon" :src="c.favicon" class="favicon-thumb" alt="Current favicon" />
             <div v-else class="favicon-thumb favicon-thumb--empty" aria-hidden="true">ico</div>
-            <label class="file-btn">{{ uploading['favicon'] ? 'Uploading…' : (c.favicon ? 'Replace' : 'Upload') }}
+            <label class="file-btn file-btn--upload">{{ uploading['favicon'] ? 'Uploading…' : (c.favicon ? 'Replace' : 'Upload') }}
               <input type="file" accept="image/png,image/x-icon,image/svg+xml,image/vnd.microsoft.icon" :disabled="!!uploading['favicon']" @change="onFaviconFile" />
             </label>
-            <input v-model="c.favicon" placeholder="or paste URL (.ico / .png / .svg)" class="flex-1" />
+            <span class="favicon-hint">PNG, SVG or ICO · square works best</span>
             <button v-if="c.favicon" type="button" class="btn-remove btn-remove--icon" :title="'Clear favicon'" @click="c.favicon = ''">×</button>
           </div>
         </label>
-        <div class="row-3">
-          <label>Theme
-            <select v-model="c.theme">
-              <option>studio</option><option>ironwood</option><option>heritage</option><option>vibrant</option>
-            </select>
-          </label>
-          <label>Swatch
-            <select v-model="c.swatch">
-              <option>sand</option><option>charcoal</option><option>clay</option><option>sage</option><option>slate</option>
-            </select>
-          </label>
-          <label>Variant
-            <select v-model="c.variant">
-              <option>essentials</option><option>portfolio</option><option>extended</option>
-            </select>
-          </label>
-        </div>
       </fieldset>
 
       <!-- ── Contact ── -->
@@ -651,22 +641,12 @@ watch(siteId, loadDraft)
 
         <div class="photo-row">
           <div class="photo-slot">
-            <p class="photo-slot__label">Hero image <span class="hint">16:9 · 2400px wide</span></p>
-            <img v-if="c.photos.hero.src" :src="c.photos.hero.src" class="photo-thumb" />
-            <label class="file-btn">{{ uploading['hero'] ? 'Uploading…' : 'Upload hero' }}
-              <input type="file" accept="image/*" :disabled="!!uploading['hero']" @change="onPhotoFile(c.photos.hero, 'hero', $event)" />
-            </label>
-            <input v-model="c.photos.hero.src" placeholder="or paste URL" />
+            <ImageInput v-model="c.photos.hero.src" :site-id="siteId" label="Hero image" hint="16:9 · 2400px wide" />
             <input v-model="c.photos.hero.alt" placeholder="Alt text" />
             <input v-model="c.photos.hero.caption" placeholder="Caption (optional)" />
           </div>
           <div class="photo-slot">
-            <p class="photo-slot__label">About image <span class="hint">Portrait or 4:5</span></p>
-            <img v-if="c.photos.about.src" :src="c.photos.about.src" class="photo-thumb" />
-            <label class="file-btn">{{ uploading['about'] ? 'Uploading…' : 'Upload about' }}
-              <input type="file" accept="image/*" :disabled="!!uploading['about']" @change="onPhotoFile(c.photos.about, 'about', $event)" />
-            </label>
-            <input v-model="c.photos.about.src" placeholder="or paste URL" />
+            <ImageInput v-model="c.photos.about.src" :site-id="siteId" label="About image" hint="Portrait or 4:5" aspect="4 / 5" />
             <input v-model="c.photos.about.alt" placeholder="Alt text" />
             <input v-model="c.photos.about.caption" placeholder="Caption (optional)" />
           </div>
@@ -675,11 +655,7 @@ watch(siteId, loadDraft)
         <p class="section-sub">Gallery <span class="hint">6–8 for essentials · 12–16 for portfolio · 20–28 for extended</span></p>
         <div class="gallery-grid">
           <div v-for="(g, i) in c.photos.gallery" :key="i" class="photo-slot photo-slot--sm">
-            <img v-if="g.src" :src="g.src" class="photo-thumb" />
-            <label class="file-btn">{{ uploading[`g${i}`] ? 'Uploading…' : 'Upload' }}
-              <input type="file" accept="image/*" :disabled="!!uploading[`g${i}`]" @change="onPhotoFile(g, `g${i}`, $event)" />
-            </label>
-            <input v-model="g.src" placeholder="or paste URL" />
+            <ImageInput v-model="g.src" :site-id="siteId" aspect="1 / 1" />
             <input v-model="g.alt" placeholder="Alt text" />
             <button type="button" class="btn-remove btn-remove--inline" @click="removeGallerySlot(i)">Remove</button>
           </div>
@@ -720,40 +696,57 @@ watch(siteId, loadDraft)
       <!-- ── Menu (mesa) ── -->
       <fieldset v-if="activeTab === 'menu'">
         <legend>Menu</legend>
-        <div class="row-2">
-          <label>Menu intro line<input v-model="c.menu.intro" placeholder="Updated weekly with…" /></label>
-          <label>Full menu PDF
-            <div class="pdf-upload">
-              <input
-                type="file"
-                accept="application/pdf"
-                :disabled="uploading['menuPdf']"
-                @change="onMenuPdfFile"
-              />
-              <a v-if="c.menu.fullMenuUrl" :href="c.menu.fullMenuUrl" target="_blank" rel="noopener" class="pdf-upload__link">View current PDF</a>
-              <button
-                v-if="c.menu.fullMenuUrl"
-                type="button"
-                class="pdf-upload__clear"
-                @click="c.menu.fullMenuUrl = ''"
-              >Remove</button>
-              <span v-if="uploading['menuPdf']" class="meta">Uploading…</span>
+        <label>Menu intro line<input v-model="c.menu.intro" placeholder="Updated weekly with…" /></label>
+
+        <div class="menu-uploads">
+          <div class="menu-upload">
+            <span class="menu-upload__title">Full menu PDF</span>
+            <div class="file-actions">
+              <label class="file-btn file-btn--upload">
+                {{ uploading['menuPdf'] ? 'Uploading…' : (c.menu.fullMenuUrl ? 'Replace PDF' : 'Choose PDF') }}
+                <input type="file" accept="application/pdf" :disabled="uploading['menuPdf']" @change="onMenuPdfFile" />
+              </label>
+              <a v-if="c.menu.fullMenuUrl" :href="c.menu.fullMenuUrl" target="_blank" rel="noopener" class="pdf-upload__link">View current</a>
+              <button v-if="c.menu.fullMenuUrl" type="button" class="pdf-upload__clear" @click="c.menu.fullMenuUrl = ''">Remove</button>
             </div>
-          </label>
+          </div>
+
+          <div class="menu-upload menu-upload--scan">
+            <span class="menu-upload__title">Scan a menu photo</span>
+            <MenuScanButton v-if="siteId" :site-id="siteId" @scanned="applyScannedMenu" />
+            <span class="menu-upload__hint">Snap or upload a photo of your printed menu — we read the text and fill in the items below for you.</span>
+          </div>
         </div>
 
         <div v-for="(cat, ci) in c.menu.categories" :key="ci" class="menu-cat">
-          <div class="menu-cat__header">
-            <input v-model="cat.name" placeholder="Category (e.g. Small)" class="flex-2" />
-            <input v-model="cat.description" placeholder="Short description (optional)" class="flex-3" />
-            <button type="button" class="btn-remove" @click="removeCategory(ci)">Remove category</button>
+          <div class="menu-cat__top">
+            <div class="menu-cat__img">
+              <ImageInput :model-value="cat.image ?? ''" :site-id="siteId" aspect="1 / 1" @update:model-value="(v: string) => cat.image = v" />
+            </div>
+            <div class="menu-cat__fields">
+              <div class="menu-cat__row">
+                <input v-model="cat.name" placeholder="Category (e.g. Small plates)" class="flex-1" />
+                <button type="button" class="btn-remove" @click="removeCategory(ci)">Remove category</button>
+              </div>
+              <input v-model="cat.description" placeholder="Short description (optional)" />
+            </div>
           </div>
+
           <div v-for="(item, ii) in cat.items" :key="ii" class="menu-item">
-            <input v-model="item.name" placeholder="Dish name" class="flex-2" />
-            <input v-model="item.description" placeholder="Description" class="flex-3" />
-            <input v-model="item.price" placeholder="$0" style="max-width:80px" />
-            <input :value="tagsStr(item)" @input="setTags(item, ($event.target as HTMLInputElement).value)" placeholder="V, GF…" style="max-width:100px" />
-            <button type="button" class="btn-remove btn-remove--icon" @click="removeMenuItem(cat, ii)">×</button>
+            <div class="menu-item__img">
+              <ImageInput :model-value="item.image ?? ''" :site-id="siteId" aspect="1 / 1" @update:model-value="(v: string) => item.image = v" />
+            </div>
+            <div class="menu-item__body">
+              <div class="menu-item__row">
+                <input v-model="item.name" placeholder="Dish name" class="menu-item__name" />
+                <input v-model="item.price" placeholder="$0" class="menu-item__price" />
+                <div class="menu-item__tags">
+                  <ChipsInput :model-value="item.tags ?? []" placeholder="V, GF…" @update:model-value="(v: string[]) => item.tags = v" />
+                </div>
+                <button type="button" class="btn-remove btn-remove--icon" @click="removeMenuItem(cat, ii)">×</button>
+              </div>
+              <TextAreaField v-model="item.description" :rows="2" :maxlength="160" placeholder="Description…" />
+            </div>
           </div>
           <button type="button" class="btn-add btn-add--indent" @click="addMenuItem(cat)">+ Add item</button>
         </div>
@@ -768,25 +761,29 @@ watch(siteId, loadDraft)
             <input v-model="r.name" placeholder="Room name (e.g. Mountain Suite)" />
             <input v-model="r.rateFrom" placeholder="Rate from (e.g. $180)" />
           </div>
-          <input :value="featuresStr(r)" placeholder="Features, comma-separated (King bed, Sleeps 2, Soaking tub)" @input="setFeatures(r, ($event.target as HTMLInputElement).value)" />
+          <ChipsInput
+            :model-value="r.features ?? []"
+            placeholder="Add a feature (King bed, Sleeps 2…)"
+            @update:model-value="(v: string[]) => r.features = v"
+          />
           <div class="field-with-ai">
             <TextAreaField v-model="r.blurb" :rows="2" :maxlength="300" placeholder="Short description…" />
             <AiCopyButton :site-id="siteId" :field="`room: ${r.name || 'room'}`" prompt="A short, warm room description (~25 words)" :context="aiContext" @pick="(v) => r.blurb = v" />
           </div>
-          <div class="list-row">
-            <img v-if="r.image" :src="r.image" class="photo-thumb" style="max-width:160px" />
-            <label class="file-btn">{{ uploading[`room${i}`] ? 'Uploading…' : 'Upload photo' }}
-              <input type="file" accept="image/*" :disabled="!!uploading[`room${i}`]" @change="onInlineFile(r, `room${i}`, $event, 'image')" />
-            </label>
-            <input v-model="r.image" placeholder="or paste URL" class="flex-1" />
-          </div>
+          <ImageInput
+            :model-value="r.image ?? ''"
+            :site-id="siteId"
+            @update:model-value="(v: string) => r.image = v"
+          />
           <button type="button" class="btn-remove" @click="removeRoom(i)">Remove room</button>
         </div>
         <button type="button" class="btn-add" @click="addRoom">+ Add room</button>
 
         <p class="section-sub">Amenities <span class="hint">included with every stay</span></p>
         <div v-for="(a, i) in c.amenities" :key="i" class="list-row">
-          <input v-model="a.icon" placeholder="Icon (emoji)" style="max-width:90px" />
+          <div style="width: 140px; flex-shrink: 0">
+            <IconInput :model-value="a.icon ?? ''" @update:model-value="(v: string) => a.icon = v" />
+          </div>
           <input v-model="a.label" placeholder="Label (e.g. High-speed Wi-Fi)" />
           <input v-model="a.description" placeholder="Short description (optional)" class="flex-1" />
           <button type="button" class="btn-remove" @click="removeAmenity(i)">✕</button>
@@ -802,7 +799,9 @@ watch(siteId, loadDraft)
             <input v-model="s.name" placeholder="Service name" />
             <input v-model="s.price" placeholder="Price (e.g. From $120)" />
           </div>
-          <input v-model="s.icon" placeholder="Icon (emoji, e.g. 🔧)" style="max-width:160px" />
+          <div style="max-width: 160px">
+            <IconInput :model-value="s.icon ?? ''" @update:model-value="(v: string) => s.icon = v" />
+          </div>
           <div class="field-with-ai">
             <TextAreaField v-model="s.description" :rows="2" :maxlength="300" placeholder="Description…" />
             <AiCopyButton :site-id="siteId" :field="`service: ${s.name || 'service'}`" prompt="A short, concrete service description (~30 words)" :context="aiContext" @pick="(v) => s.description = v" />
@@ -833,23 +832,29 @@ watch(siteId, loadDraft)
             <TextAreaField v-model="p.blurb" :rows="2" :maxlength="300" placeholder="Short description…" />
             <AiCopyButton :site-id="siteId" :field="`product: ${p.name || 'product'}`" prompt="A short, tactile product description (~20 words)" :context="aiContext" @pick="(v) => p.blurb = v" />
           </div>
-          <div class="list-row">
-            <img v-if="p.image" :src="p.image" class="photo-thumb" style="max-width:160px" />
-            <label class="file-btn">{{ uploading[`prod${i}`] ? 'Uploading…' : 'Upload photo' }}
-              <input type="file" accept="image/*" :disabled="!!uploading[`prod${i}`]" @change="onInlineFile(p, `prod${i}`, $event, 'image')" />
-            </label>
-            <input v-model="p.image" placeholder="or paste URL" class="flex-1" />
-          </div>
+          <ImageInput
+            :model-value="p.image ?? ''"
+            :site-id="siteId"
+            aspect="1 / 1"
+            @update:model-value="(v: string) => p.image = v"
+          />
           <button type="button" class="btn-remove" @click="removeProduct(i)">Remove product</button>
         </div>
         <button type="button" class="btn-add" @click="addProduct">+ Add product</button>
 
         <p class="section-sub">Shop categories</p>
-        <div v-for="(cat, i) in c.categories" :key="i" class="list-row">
-          <input v-model="cat.name" placeholder="Category name (e.g. Apparel)" />
-          <input v-model="cat.count" placeholder="Item count" style="max-width:110px" />
-          <input v-model="cat.image" placeholder="Image URL" class="flex-1" />
-          <button type="button" class="btn-remove" @click="removeShopCategory(i)">✕</button>
+        <div v-for="(cat, i) in c.categories" :key="i" class="testimonial-row">
+          <div class="row-2">
+            <input v-model="cat.name" placeholder="Category name (e.g. Apparel)" />
+            <input v-model="cat.count" placeholder="Item count (e.g. 24 items)" />
+          </div>
+          <ImageInput
+            :model-value="cat.image ?? ''"
+            :site-id="siteId"
+            aspect="1 / 1"
+            @update:model-value="(v: string) => cat.image = v"
+          />
+          <button type="button" class="btn-remove" @click="removeShopCategory(i)">Remove category</button>
         </div>
         <button type="button" class="btn-add" @click="addShopCategory">+ Add category</button>
       </fieldset>
@@ -871,13 +876,11 @@ watch(siteId, loadDraft)
             <TextAreaField v-model="e.blurb" :rows="2" :maxlength="300" placeholder="One line that sells the night…" />
             <AiCopyButton :site-id="siteId" :field="`event: ${e.title || 'event'}`" prompt="A punchy one-line event description (~20 words)" :context="aiContext" @pick="(v) => e.blurb = v" />
           </div>
-          <div class="list-row">
-            <img v-if="e.image" :src="e.image" class="photo-thumb" style="max-width:160px" />
-            <label class="file-btn">{{ uploading[`event${i}`] ? 'Uploading…' : 'Upload photo' }}
-              <input type="file" accept="image/*" :disabled="!!uploading[`event${i}`]" @change="onInlineFile(e, `event${i}`, $event, 'image')" />
-            </label>
-            <input v-model="e.image" placeholder="or paste URL" class="flex-1" />
-          </div>
+          <ImageInput
+            :model-value="e.image ?? ''"
+            :site-id="siteId"
+            @update:model-value="(v: string) => e.image = v"
+          />
           <button type="button" class="btn-remove" @click="removeEvent(i)">Remove event</button>
         </div>
         <button type="button" class="btn-add" @click="addEvent">+ Add event</button>
@@ -904,42 +907,13 @@ watch(siteId, loadDraft)
         <button type="button" class="btn-add" @click="addPillar">+ Add pillar</button>
       </fieldset>
 
-      <!-- ── Testimonials ── -->
-      <fieldset v-if="activeTab === 'testimonials'">
-        <legend>Testimonials</legend>
-        <div class="reviews-source">
-          <label class="reviews-source__label">Show on the public site</label>
-          <div class="reviews-source__choices">
-            <label class="reviews-source__choice">
-              <input type="radio" v-model="c.reviewsSource" value="manual" />
-              <span>Hand-written testimonials</span>
-            </label>
-            <label class="reviews-source__choice">
-              <input type="radio" v-model="c.reviewsSource" value="google" />
-              <span>Live Google reviews</span>
-            </label>
-          </div>
-          <p class="reviews-source__hint">
-            Live reviews pull from the business connected on the
-            <em>Google Reviews</em> page. If none are available, the public
-            site falls back to the hand-written list below.
-          </p>
-        </div>
-        <div v-for="(t, i) in c.testimonials" :key="i" class="testimonial-row">
-          <TextAreaField v-model="t.quote" :rows="2" :maxlength="400" placeholder="Quote…" />
-          <div class="row-2">
-            <input v-model="t.author" placeholder="Author name" />
-            <input v-model="t.source" placeholder="Source (Google, Yelp…)" />
-          </div>
-          <button type="button" class="btn-remove" @click="removeTestimonial(i)">Remove</button>
-        </div>
-        <button type="button" class="btn-add" @click="addTestimonial">+ Add testimonial</button>
-      </fieldset>
-
       <!-- ── Social ── -->
       <fieldset v-if="activeTab === 'social'">
         <legend>Social links</legend>
-        <div v-for="(s, i) in c.social" :key="i" class="list-row">
+        <div v-for="(s, i) in c.social" :key="i" class="social-row">
+          <div class="social-row__icon">
+            <SocialIconInput :model-value="s.icon ?? ''" @update:model-value="(v: string) => s.icon = v" />
+          </div>
           <input v-model="s.label" placeholder="Label (Instagram, Facebook…)" class="flex-1" />
           <input v-model="s.href"  placeholder="https://…" class="flex-3" />
           <button type="button" class="btn-remove btn-remove--icon" @click="removeSocial(i)">×</button>
@@ -965,6 +939,8 @@ watch(siteId, loadDraft)
 .cv-header { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 1.5rem; }
 .cv-header h1 { margin: 0; font-family: var(--adm-font-serif); font-weight: 500; }
 .cv-header__right { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+/* Save draft / Publish are pill-shaped (matching the save-bar pill). */
+.cv-header__right > button { border-radius: 999px; padding-inline: 1.25rem; }
 
 /* Version chip is a button that opens the history dropdown. */
 .history-wrap { position: relative; display: inline-block; }
@@ -1140,6 +1116,15 @@ textarea { resize: vertical; }
 .flex-2 { flex: 2; }
 .flex-3 { flex: 3; }
 
+/* Social link row — icon chooser + label + URL, all on one baseline. */
+.social-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.6rem; }
+.social-row__icon { flex: 0 0 auto; width: 150px; }
+.social-row input { margin-top: 0; min-height: 2.5rem; }
+@media (max-width: 640px) {
+  .social-row { flex-wrap: wrap; }
+  .social-row__icon { width: 100%; }
+}
+
 /* Buttons */
 button {
   padding: 0.45rem 0.95rem;
@@ -1198,18 +1183,27 @@ button:hover { border-color: var(--adm-accent); color: var(--adm-accent); }
 .field-with-ai { display: flex; align-items: flex-start; gap: 0.5rem; }
 .field-with-ai > .ta-field { flex: 1; min-width: 0; }
 
-/* Favicon picker row. */
-.favicon-row { display: flex; align-items: center; gap: 0.5rem; margin-top: 0.3rem; }
+/* Favicon picker row. Thumb + upload button share the input's outer height
+   so the control lines up with the text fields above it. */
+.favicon-row { display: flex; align-items: center; gap: 0.6rem; margin-top: 0.3rem; }
 .favicon-thumb {
-  width: 2.4rem;
-  height: 2.4rem;
-  border-radius: 6px;
+  width: 2.6rem;
+  height: 2.6rem;
+  border-radius: var(--adm-radius-sm);
   background: var(--adm-surface-2);
   border: 1px solid var(--adm-border);
   object-fit: contain;
-  padding: 2px;
+  padding: 3px;
   box-sizing: border-box;
+  flex-shrink: 0;
 }
+.favicon-row .file-btn--upload {
+  height: 2.6rem;
+  display: inline-flex; align-items: center;
+  padding-inline: 1.1rem;
+  flex-shrink: 0;
+}
+.favicon-hint { font-size: 0.78rem; color: var(--adm-text-subtle); font-weight: 400; letter-spacing: normal; text-transform: none; }
 .favicon-thumb--empty {
   display: inline-flex;
   align-items: center;
@@ -1267,30 +1261,63 @@ button:hover { border-color: var(--adm-accent); color: var(--adm-accent); }
 .file-btn:hover { border-color: var(--adm-accent); color: var(--adm-accent); }
 .file-btn input[type="file"] { display: none; }
 
-/* Menu */
-.pdf-upload {
-  display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem;
-  margin-top: 0.3rem;
+/* Menu — uploads row (PDF + AI photo scan) */
+.menu-uploads {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem; margin: 0.25rem 0 0.5rem;
 }
-.pdf-upload input[type="file"] { width: auto; margin: 0; }
-.pdf-upload__link {
-  font-size: 0.8rem; color: var(--adm-accent); text-decoration: underline;
+.menu-upload {
+  display: flex; flex-direction: column; gap: 0.5rem;
+  padding: 0.9rem 1rem;
+  background: var(--adm-surface-3);
+  border: 1px solid var(--adm-border-soft);
+  border-radius: var(--adm-radius-lg);
 }
+.menu-upload--scan { border-style: dashed; }
+.menu-upload__title {
+  font-size: 0.74rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--adm-text-muted);
+}
+.menu-upload__hint { font-size: 0.78rem; color: var(--adm-text-subtle); font-weight: 400; letter-spacing: normal; text-transform: none; line-height: 1.4; }
+.file-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; }
+.pdf-upload__link { font-size: 0.8rem; color: var(--adm-accent); text-decoration: underline; }
 .pdf-upload__clear {
   background: transparent; border: 1px solid var(--adm-border);
-  color: var(--adm-text-muted); font-size: 0.75rem; padding: 0.2rem 0.55rem;
+  color: var(--adm-text-muted); font-size: 0.75rem; padding: 0.25rem 0.6rem;
   border-radius: 999px; cursor: pointer;
 }
 .pdf-upload__clear:hover { border-color: var(--adm-danger); color: var(--adm-danger); }
+
+/* Menu categories + items — image on the left, aligned field rows on the right */
 .menu-cat {
   background: var(--adm-surface-3);
   border: 1px solid var(--adm-border-soft);
-  border-radius: var(--adm-radius, 10px);
-  padding: 0.85rem; margin-bottom: 0.85rem;
+  border-radius: var(--adm-radius-lg);
+  padding: 1rem; margin-bottom: 0.85rem;
 }
-.menu-cat__header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
-.menu-item { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem; }
-.menu-item input { margin-top: 0; }
+.menu-cat__top { display: grid; grid-template-columns: 88px 1fr; gap: 0.75rem; margin-bottom: 0.85rem; }
+.menu-cat__img { width: 88px; }
+.menu-cat__fields { display: flex; flex-direction: column; gap: 0.5rem; min-width: 0; }
+.menu-cat__row { display: flex; align-items: center; gap: 0.5rem; }
+.menu-cat__fields input { margin-top: 0; }
+
+.menu-item {
+  display: grid; grid-template-columns: 72px 1fr; gap: 0.6rem;
+  padding: 0.7rem; margin-bottom: 0.5rem;
+  background: var(--adm-surface-2);
+  border: 1px solid var(--adm-border-soft);
+  border-radius: var(--adm-radius);
+}
+.menu-item__img { width: 72px; }
+.menu-item__body { display: flex; flex-direction: column; gap: 0.45rem; min-width: 0; }
+/* Every control on this row shares the same height + centered baseline so the
+   fields line up instead of drifting off the row. */
+.menu-item__row { display: flex; align-items: center; gap: 0.5rem; }
+.menu-item__row input { margin-top: 0; min-height: 2.5rem; }
+.menu-item__name { flex: 1 1 auto; min-width: 0; }
+.menu-item__price { flex: 0 0 5rem; width: 5rem; text-align: center; }
+.menu-item__tags { flex: 1 1 40%; min-width: 130px; }
+.menu-item__tags :deep(.ai-control) { margin-top: 0; }
 
 /* Testimonials */
 .reviews-source {
